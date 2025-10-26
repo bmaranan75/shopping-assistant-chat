@@ -1,0 +1,322 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MCP Server Test UI</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: #f5f5f5;
+            padding: 20px;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            overflow: hidden;
+        }
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 30px;
+        }
+        .header h1 { margin-bottom: 10px; }
+        .header p { opacity: 0.9; }
+        .content { padding: 30px; }
+        .tool-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+        .tool-card {
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            padding: 20px;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+        .tool-card:hover {
+            border-color: #667eea;
+            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.15);
+        }
+        .tool-card h3 {
+            color: #333;
+            margin-bottom: 10px;
+        }
+        .tool-card p {
+            color: #666;
+            font-size: 14px;
+        }
+        .tool-card button {
+            margin-top: 15px;
+            padding: 8px 16px;
+            background: #667eea;
+            color: white;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 14px;
+        }
+        .tool-card button:hover {
+            background: #5568d3;
+        }
+        .input-field {
+            width: 100%;
+            padding: 10px;
+            border: 2px solid #e0e0e0;
+            border-radius: 6px;
+            font-size: 14px;
+            margin-top: 10px;
+            transition: border-color 0.3s;
+        }
+        .input-field:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+        .result {
+            background: #f9f9f9;
+            border-radius: 8px;
+            padding: 20px;
+            margin-top: 20px;
+            display: none;
+        }
+        .result.show { display: block; }
+        .result h3 {
+            color: #333;
+            margin-bottom: 15px;
+        }
+        .result pre {
+            background: #fff;
+            padding: 15px;
+            border-radius: 6px;
+            overflow-x: auto;
+            font-size: 13px;
+            line-height: 1.6;
+        }
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: #666;
+        }
+        .spinner {
+            border: 3px solid #f3f3f3;
+            border-top: 3px solid #667eea;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 20px;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        .status {
+            padding: 10px 20px;
+            background: #4CAF50;
+            color: white;
+            border-radius: 6px;
+            margin-bottom: 20px;
+            display: none;
+        }
+        .status.error {
+            background: #f44336;
+        }
+        .status.show { display: block; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🔧 MCP Server Test UI</h1>
+            <p>Test your LangGraph agents exposed via Model Context Protocol</p>
+        </div>
+        
+        <div class="content">
+            <div id="status" class="status"></div>
+            
+            <div class="tool-grid">
+                <div class="tool-card">
+                    <h3>🔍 Search Products</h3>
+                    <p>Search the Safeway catalog for products</p>
+                    <input 
+                        type="text" 
+                        id="searchQuery" 
+                        class="input-field"
+                        placeholder="e.g., milk, apples, bread" 
+                        value="milk"
+                    />
+                    <button onclick="testSearchProducts()">
+                        Search Products
+                    </button>
+                </div>
+                
+                <div class="tool-card">
+                    <h3>🛒 Add to Cart</h3>
+                    <p>Add a product to your shopping cart</p>
+                    <input 
+                        type="text" 
+                        id="productCode" 
+                        class="input-field"
+                        placeholder="Product code (e.g., milk)" 
+                        value="milk"
+                    />
+                    <input 
+                        type="number" 
+                        id="quantity" 
+                        class="input-field"
+                        placeholder="Quantity" 
+                        value="1"
+                        min="1"
+                    />
+                    <button onclick="testAddToCart()">
+                        Add to Cart
+                    </button>
+                </div>
+                
+                <div class="tool-card">
+                    <h3>� View Cart</h3>
+                    <p>View current shopping cart contents</p>
+                    <button onclick="testTool('cart', {action: 'view'})">
+                        View Cart
+                    </button>
+                </div>
+                
+                <div class="tool-card">
+                    <h3>🎁 Get Deals</h3>
+                    <p>Get current deals and promotions</p>
+                    <input 
+                        type="text" 
+                        id="dealsCategory" 
+                        class="input-field"
+                        placeholder="Category (optional)" 
+                        value=""
+                    />
+                    <button onclick="testGetDeals()">
+                        Get Deals
+                    </button>
+                </div>
+            </div>
+            
+            <div id="result" class="result">
+                <h3>Response:</h3>
+                <pre id="resultContent"></pre>
+            </div>
+            
+            <div id="loading" class="loading" style="display: none;">
+                <div class="spinner"></div>
+                <p>Calling agent...</p>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const API_KEY = '2cf6ea0bd761a602e81f69aebbc77d676dccf454a5bb650ab8d1f637a249493e';
+        const BASE_URL = 'http://localhost:3000';
+
+        function showStatus(message, isError = false) {
+            const status = document.getElementById('status');
+            status.textContent = message;
+            status.className = 'status show' + (isError ? ' error' : '');
+            setTimeout(() => {
+                status.className = 'status';
+            }, 5000);
+        }
+
+        function extractResponse(data) {
+            if (data.messages && Array.isArray(data.messages)) {
+                const lastMessage = data.messages[data.messages.length - 1];
+                if (lastMessage?.kwargs?.content) {
+                    return lastMessage.kwargs.content;
+                }
+            }
+            return JSON.stringify(data, null, 2);
+        }
+
+        async function testTool(agent, data) {
+            const loading = document.getElementById('loading');
+            const result = document.getElementById('result');
+            const resultContent = document.getElementById('resultContent');
+
+            loading.style.display = 'block';
+            result.classList.remove('show');
+
+            try {
+                const response = await fetch(`${BASE_URL}/api/mcp/agents/${agent}`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-MCP-API-Key': API_KEY
+                    },
+                    body: JSON.stringify(data)
+                });
+
+                const resultData = await response.json();
+
+                loading.style.display = 'none';
+
+                if (response.ok) {
+                    const aiResponse = extractResponse(resultData);
+                    resultContent.textContent = aiResponse;
+                    result.classList.add('show');
+                    showStatus('✅ Agent responded successfully!');
+                } else {
+                    resultContent.textContent = JSON.stringify(resultData, null, 2);
+                    result.classList.add('show');
+                    showStatus('❌ Agent returned an error', true);
+                }
+            } catch (error) {
+                loading.style.display = 'none';
+                resultContent.textContent = `Error: ${error.message}\n\nMake sure Next.js is running on ${BASE_URL}`;
+                result.classList.add('show');
+                showStatus('❌ Failed to connect to server', true);
+            }
+        }
+
+        function testSearchProducts() {
+            const query = document.getElementById('searchQuery').value;
+            if (!query.trim()) {
+                showStatus('⚠️ Please enter a search query', true);
+                return;
+            }
+            testTool('catalog', {
+                action: 'search',
+                query: query,
+                limit: 5
+            });
+        }
+
+        function testAddToCart() {
+            const productCode = document.getElementById('productCode').value;
+            const quantity = parseInt(document.getElementById('quantity').value) || 1;
+            
+            if (!productCode.trim()) {
+                showStatus('⚠️ Please enter a product code', true);
+                return;
+            }
+            
+            testTool('cart', {
+                action: 'add',
+                productCode: productCode,
+                quantity: quantity
+            });
+        }
+
+        function testGetDeals() {
+            const category = document.getElementById('dealsCategory').value;
+            const data = { action: 'get' };
+            
+            if (category.trim()) {
+                data.category = category;
+            }
+            
+            testTool('deals', data);
+        }
+    </script>
+</body>
+</html>
