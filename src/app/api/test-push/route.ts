@@ -1,5 +1,41 @@
 import { NextResponse } from 'next/server';
-import { sendPushoverNotification } from '@/lib/agents/supervisor';
+
+// Simple Pushover notification function (moved from removed supervisor agent)
+async function sendPushoverNotification({ 
+  title, 
+  message, 
+  token, 
+  user 
+}: { 
+  title: string; 
+  message: string; 
+  token?: string; 
+  user?: string; 
+}) {
+  const pushToken = token || process.env.PUSHOVER_TOKEN;
+  const pushUser = user || process.env.PUSHOVER_USER;
+
+  if (!pushToken || !pushUser) {
+    throw new Error('Missing Pushover credentials');
+  }
+
+  const response = await fetch('https://api.pushover.net/1/messages.json', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({
+      token: pushToken,
+      user: pushUser,
+      title,
+      message
+    })
+  });
+
+  if (!response.ok) {
+    throw new Error(`Pushover API error: ${response.status}`);
+  }
+
+  return response.json();
+}
 
 // POST /api/test-push
 export async function POST(req: Request) {
