@@ -1,3 +1,17 @@
+/**
+ * LangGraph Client for External Agent Communication
+ * 
+ * This client connects to externally deployed LangGraph agents.
+ * It does NOT contain agent implementations - those are deployed separately.
+ * 
+ * Configuration: Set LANGGRAPH_SERVER_URL environment variable
+ * Default: http://localhost:2024
+ * 
+ * Authentication: Uses OAuth2 client credentials flow for MCP server authentication
+ */
+
+import { getMCPOAuth2Client } from '../mcp/oauth2-client';
+
 export const conversationThreadMap = new Map<string, string>();
 export const conversationThreadTimestamps = new Map<string, number>();
 
@@ -72,9 +86,16 @@ export class LangGraphClient {
       return threadId;
     }
 
+    // Get OAuth2 authorization header
+    const oauth2Client = getMCPOAuth2Client();
+    const authHeader = await oauth2Client.getAuthorizationHeader();
+
     const res = await fetch(`${this.baseUrl}/threads`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 
+        'Content-Type': 'application/json',
+        'Authorization': authHeader
+      },
       body: JSON.stringify({ metadata: { conversationId, userId, agentId, createdAt: new Date().toISOString() } })
     });
 
@@ -123,6 +144,10 @@ export class LangGraphClient {
     })();
   }
 
+  /**
+   * Call external agent and return collected result
+   * Used by MCP endpoints for simple request-response pattern
+   */
   async callAgentWithStream(opts: AgentCallOptions): Promise<AgentCallResult> {
     const { agentId, message, userId, conversationId } = opts;
     let attempt = 0;
@@ -140,8 +165,18 @@ export class LangGraphClient {
           stream_mode: 'values'
         };
 
+        // Get OAuth2 authorization header
+        const oauth2Client = getMCPOAuth2Client();
+        const authHeader = await oauth2Client.getAuthorizationHeader();
+
         const resp = await fetch(`${this.baseUrl}/threads/${threadId}/runs/stream`, {
-          method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream' }, body: JSON.stringify(messageData)
+          method: 'POST', 
+          headers: { 
+            'Content-Type': 'application/json', 
+            'Accept': 'text/event-stream',
+            'Authorization': authHeader
+          }, 
+          body: JSON.stringify(messageData)
         });
 
         if (!resp.ok) {
@@ -149,7 +184,7 @@ export class LangGraphClient {
           throw new Error(`LangGraph agent error: ${resp.status} ${resp.statusText} ${text}`);
         }
 
-  const reader = resp.body?.getReader();
+        const reader = resp.body?.getReader();
         if (!reader) throw new Error('No response body reader from LangGraph');
 
         let messages: any[] = [];
@@ -204,6 +239,57 @@ export class LangGraphClient {
 
     const fallback = `I apologize, but I'm having trouble connecting to the ${opts.agentId} service right now.`;
     return { messages: [{ role: 'assistant', content: fallback }], content: fallback };
+  }
+
+  /**
+   * Call external agent and return a ReadableStream for real-time streaming
+   * Used for chat interfaces that need live streaming responses
+   */
+  async streamAgentResponse(opts: AgentCallOptions): Promise<ReadableStream<Uint8Array>> {
+    const { agentId, message, userId, conversationId } = opts;
+    
+    try {
+      const threadId = await this.ensureThread(conversationId, userId, agentId);
+
+      const messageData = {
+        input: { messages: [{ role: 'human', content: message }], userId, conversationId },
+        assistant_id: agentId,
+        config: { configurable: { _credentials: { user: { sub: userId } } } },
+        stream_mode: 'values'
+      };
+
+      // Get OAuth2 authorization header
+      const oauth2Client = getMCPOAuth2Client();
+      const authHeader = await oauth2Client.getAuthorizationHeader();
+
+      const resp = await fetch(`${this.baseUrl}/threads/${threadId}/runs/stream`, {
+        method: 'POST', 
+        headers: { 
+          'Content-Type': 'application/json', 
+          'Accept': 'text/event-stream',
+          'Authorization': authHeader
+        }, 
+        body: JSON.stringify(messageData)
+      });
+
+      if (!resp.ok) {
+        const text = await resp.text().catch(() => '');
+        throw new Error(`LangGraph agent error: ${resp.status} ${resp.statusText} ${text}`);
+      }
+
+      return resp.body || new ReadableStream();
+    } catch (error) {
+      // Return an error stream
+      const encoder = new TextEncoder();
+      const errorMessage = error instanceof Error ? error.message : 'Failed to connect to external agent';
+      
+      return new ReadableStream({
+        start(controller) {
+          controller.enqueue(encoder.encode(`data: {"error": "${errorMessage}"}\n\n`));
+          controller.close();
+        }
+      });
+    }
   }
 
   evictStaleThreads(ttlMs: number) {
