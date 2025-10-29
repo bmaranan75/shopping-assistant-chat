@@ -294,7 +294,19 @@ export function ChatWindow(props: {
   };
 
   // Function to start a new chat conversation
-  const startNewChat = () => {
+  const startNewChat = async () => {
+    // Clear thread cache for the current conversation before starting new one
+    try {
+      await fetch('/api/clear-conversation', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ conversationId })
+      });
+    } catch (error) {
+      console.error('Failed to clear conversation thread:', error);
+      // Continue with new chat even if clearing fails
+    }
+    
     const newConversationId = generateConversationId();
     setConversationId(newConversationId);
     setMessages([]);

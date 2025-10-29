@@ -42,10 +42,7 @@ export async function middleware(request: NextRequest) {
     return NextResponse.next();
   }
 
-  // MCP routes use their own authentication (MCP_API_KEY)
-  if (request.nextUrl.pathname.startsWith("/api/mcp")) {
-    return NextResponse.next();
-  }
+
 
   const { origin } = new URL(request.url);
   const session = await auth0.getSession(request);

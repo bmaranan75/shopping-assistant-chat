@@ -53,7 +53,7 @@ export function parseSSEFromString(sse: string): SSEEvent[] {
 }
 
 export class LangGraphClient {
-  baseUrl: string;
+  public baseUrl: string;
   maxRetries: number;
   retryDelay: number;
 

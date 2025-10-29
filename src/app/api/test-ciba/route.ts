@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getUser } from '@/lib/auth0';
 import { checkoutTool } from '@/lib/tools/checkout-langchain';
-import { withAsyncAuthorization } from '@/lib/auth0-ai-langchain';
+// Temporarily use fallback due to @auth0/ai-langchain build issues
+import { withAsyncAuthorization } from '@/lib/auth0-ai-langchain-fallback';
 
 export async function POST(req: NextRequest) {
   try {

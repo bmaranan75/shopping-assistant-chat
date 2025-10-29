@@ -18,11 +18,7 @@
     "db:push": "drizzle-kit push",
     "db:studio": "drizzle-kit studio",
     "db:check": "drizzle-kit check",
-    "fga:init": "tsx src/lib/fga/fga-init.ts",
-    "mcp:dev": "tsx watch src/mcp/server.ts",
-    "mcp:build": "tsc src/mcp/server.ts --outDir dist/mcp --module nodenext --moduleResolution nodenext --esModuleInterop --target es2022",
-    "mcp:start": "node dist/mcp/server.js",
-    "mcp:prod": "npm run mcp:build && npm run mcp:start"
+    "fga:init": "tsx src/lib/fga/fga-init.ts"
   },
   "engines": {
     "node": ">=18"
@@ -33,7 +29,6 @@
     "@langchain/core": "^0.3.15",
     "@langchain/langgraph-sdk": "^0.0.107",
     "@langchain/openai": "^0.3.15",
-    "@modelcontextprotocol/sdk": "^1.20.1",
     "@radix-ui/react-avatar": "^1.1.7",
     "@radix-ui/react-checkbox": "^1.2.3",
     "@radix-ui/react-dialog": "^1.1.11",

@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { HumanMessage } from '@langchain/core/messages';
 import { createAgent } from '@/lib/multi-agent';
 import { getUser } from '@/lib/auth0';
-import { getAuthorizationState, resetAuthorizationState } from '@/lib/auth0-ai-langchain';
+// Temporarily use fallback due to @auth0/ai-langchain build issues
+import { getAuthorizationState, resetAuthorizationState } from '@/lib/auth0-ai-langchain-fallback';
 import { InMemoryCache } from "@langchain/core/caches";
 import { LangChainTracer } from "langchain/callbacks";
 
@@ -30,6 +31,8 @@ export async function POST(req: NextRequest) {
 
     const body = await req.json();
     const { messages, conversationId } = body;
+    
+    console.log(`[chat-api] Received request with conversationId: ${conversationId}`);
     
     if (!messages || !Array.isArray(messages) || messages.length === 0) {
       return NextResponse.json({
@@ -210,16 +213,122 @@ export async function POST(req: NextRequest) {
               }
               
               if (allMessages.length > 0) {
-                // Get the last non-ephemeral, non-user message
+                // Debug: Log all messages to understand what we're working with
+                console.log("[chat-api] Analyzing all messages:");
+                allMessages.forEach((msg, idx) => {
+                  const content = msg.message?.content || msg.content || '';
+                  console.log(`[chat-api] Message ${idx}: agent=${msg.agent}, role=${msg.role}, ephemeral=${msg.progress?.ephemeral}, content="${content.substring(0, 100)}"`);
+                });
+                
+                // Get messages that are substantial user-facing responses, excluding coordination and progress messages
                 const finalMessages = allMessages.filter((m: any) => {
                   const isEphemeral = m.progress?.isProgressUpdate && m.progress?.ephemeral;
                   const isUser = m.role === 'user';
-                  return !isEphemeral && !isUser;
+                  
+                  // Skip ephemeral and user messages
+                  if (isEphemeral || isUser) {
+                    return false;
+                  }
+                  
+                  const content = m.message?.content || m.content || '';
+                  
+                  // Skip empty content
+                  if (!content || typeof content !== 'string' || !content.trim()) {
+                    return false;
+                  }
+                  
+                  // Skip planner JSON coordination messages
+                  if (m.agent === 'planner' && content.trim().startsWith('{')) {
+                    try {
+                      const parsed = JSON.parse(content);
+                      if (parsed.action && parsed.confidence !== undefined) {
+                        console.log("[chat-api] Skipping planner coordination message:", content);
+                        return false;
+                      }
+                    } catch (e) {
+                      // Not JSON, continue
+                    }
+                  }
+                  
+                  // Skip short status/progress messages (emojis + brief text)
+                  if (content.match(/^[🔄🏷️✅🛒🎯📦⚡️💰🎁]\s.*/) && content.length < 50) {
+                    console.log("[chat-api] Skipping short status message:", content);
+                    return false;
+                  }
+                  
+                  // This should be a substantial message
+                  console.log("[chat-api] Including message from", m.agent, ":", content.substring(0, 50));
+                  return true;
                 });
                 
                 console.log("[chat-api] Filtered final messages count:", finalMessages.length);
                 
-                const lastMessage = finalMessages[finalMessages.length - 1];
+                // Prioritize messages from specialized agents over supervisor messages
+                let lastMessage = null;
+                if (finalMessages.length > 0) {
+                  // First, look for messages from specialized agents (deals, catalog, cart, payment)
+                  const specializedAgentMessages = finalMessages.filter(m => 
+                    m.agent && ['deals', 'catalog', 'cart', 'payment', 'checkout'].includes(m.agent)
+                  );
+                  
+                  if (specializedAgentMessages.length > 0) {
+                    lastMessage = specializedAgentMessages[specializedAgentMessages.length - 1];
+                    console.log(`[chat-api] Using specialized agent message from ${lastMessage.agent}`);
+                  } else {
+                    // Fall back to any final message
+                    lastMessage = finalMessages[finalMessages.length - 1];
+                    console.log(`[chat-api] Using general message from ${lastMessage?.agent || 'unknown'}`);
+                  }
+                }
+                
+                // If no valid message found, look for the last non-planner, non-ephemeral agent message specifically
+                if (!lastMessage) {
+                  console.log("[chat-api] No final message found after filtering, looking for agent responses...");
+                  for (let i = allMessages.length - 1; i >= 0; i--) {
+                    const msg = allMessages[i];
+                    
+                    // Skip user messages and planner messages
+                    if (msg.role === 'user' || msg.agent === 'planner') {
+                      continue;
+                    }
+                    
+                    // Skip ephemeral progress messages
+                    if (msg.progress?.isProgressUpdate && msg.progress?.ephemeral) {
+                      continue;
+                    }
+                    
+                    const content = msg.message?.content || msg.content || '';
+                    
+                    // Skip empty content and JSON coordination messages
+                    if (!content || typeof content !== 'string' || !content.trim()) {
+                      continue;
+                    }
+                    
+                    // Skip JSON coordination messages
+                    if (content.trim().startsWith('{')) {
+                      try {
+                        const parsed = JSON.parse(content);
+                        if (parsed.action && parsed.confidence !== undefined) {
+                          console.log(`[chat-api] Skipping JSON coordination from ${msg.agent}:`, content);
+                          continue;
+                        }
+                      } catch (e) {
+                        // Not JSON, continue checking
+                      }
+                    }
+                    
+                    // Skip status/progress messages (emojis + short text patterns)
+                    if (content.match(/^[🔄🏷️✅🛒🎯📦⚡️💰🎁]\s.*/) && content.length < 50) {
+                      console.log(`[chat-api] Skipping status message from ${msg.agent}:`, content);
+                      continue;
+                    }
+                    
+                    // This should be a substantial user-facing message
+                    console.log(`[chat-api] Found agent response from ${msg.agent}:`, content.substring(0, 100));
+                    lastMessage = msg;
+                    break;
+                  }
+                }
                 
                 if (lastMessage) {
                   console.log("[chat-api] Last message role:", lastMessage.role, "agent:", lastMessage.agent);
@@ -228,22 +337,41 @@ export async function POST(req: NextRequest) {
                   const unwrapped = lastMessage.message || lastMessage;
                   
                   // Extract content from various possible shapes
+                  let extractedContent = '';
                   if (typeof unwrapped === 'string') {
-                    finalResponse = unwrapped;
+                    extractedContent = unwrapped;
                   } else if (typeof unwrapped.content === 'string') {
-                    finalResponse = unwrapped.content;
+                    extractedContent = unwrapped.content;
                   } else if (unwrapped.content && Array.isArray(unwrapped.content)) {
                     // Handle array content (some LangChain messages use this)
-                    finalResponse = unwrapped.content.map((c: any) => 
+                    extractedContent = unwrapped.content.map((c: any) => 
                       typeof c === 'string' ? c : c.text || JSON.stringify(c)
                     ).join('');
                   } else if (unwrapped.text) {
-                    finalResponse = unwrapped.text;
+                    extractedContent = unwrapped.text;
                   } else {
-                    finalResponse = String(unwrapped.content || unwrapped);
+                    extractedContent = String(unwrapped.content || unwrapped);
                   }
                   
-                  console.log("[chat-api] Extracted content:", finalResponse.substring(0, 100));
+                  // Validate that the extracted content is not a JSON coordination message
+                  if (extractedContent && extractedContent.trim().startsWith('{')) {
+                    try {
+                      const parsed = JSON.parse(extractedContent);
+                      if (parsed.action && parsed.confidence !== undefined) {
+                        console.log("[chat-api] Detected planner JSON in final response, discarding:", extractedContent);
+                        extractedContent = ''; // Discard this JSON coordination message
+                      }
+                    } catch (e) {
+                      // Not JSON, use as-is
+                    }
+                  }
+                  
+                  if (extractedContent) {
+                    finalResponse = extractedContent;
+                    console.log("[chat-api] Extracted content:", finalResponse.substring(0, 100));
+                  } else {
+                    console.log("[chat-api] No valid content extracted from message");
+                  }
                 }
               } else {
                 console.log("[chat-api] No messages found in latest state");
@@ -254,13 +382,19 @@ export async function POST(req: NextRequest) {
             
             console.log("[chat-api] Final response extracted:", finalResponse);
             
+            // If we still don't have a response, provide a helpful fallback
+            if (!finalResponse || finalResponse.trim().length === 0) {
+              console.log("[chat-api] No valid response found, using fallback message");
+              finalResponse = "I'm processing your request. Please let me know if you need help with products, deals, or your shopping cart.";
+            }
+            
             // Get authorization state after processing
             const authState = getAuthorizationState();
             
             // Send final message
             sendSSE({
               type: 'message',
-              content: finalResponse || "I'm sorry, I couldn't process that request.",
+              content: finalResponse,
               authorizationStatus: authState.status !== 'idle' ? authState.status : undefined,
               authorizationMessage: authState.message || undefined,
               timestamp: Date.now()
